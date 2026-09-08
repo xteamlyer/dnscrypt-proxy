@@ -94,6 +94,23 @@ disabled_server_names = []
 #                           Connection Settings                                #
 ###############################################################################
 
+## Optional local source IPs for upstream DNS, resolver downloads, and
+## connections to proxies. Use literal IPv4/IPv6 addresses.
+## Leave both unset to let the OS choose. If either is set, covered
+## connections fail when their source is unavailable or their family has
+## no configured source; they are never retried unbound.
+##
+## Excludes direct forwarding, native system DNS, netprobe, `-resolve`,
+## local logging, and local/loopback sockets. Private destinations are covered.
+## Set `ignore_system_dns = true` to also disable native DNS fallback.
+##
+## Changes require a restart. These settings do not select routes or
+## interfaces; policy routing or NAT exemptions may be needed.
+
+# outbound_source_ipv4 = '192.0.2.10'
+# outbound_source_ipv6 = '2001:db8::10'
+
+
 ## Always use TCP to connect to upstream servers.
 ## This can be useful if you need to route everything through Tor.
 ## Otherwise, leave this to `false`, as it doesn't improve security

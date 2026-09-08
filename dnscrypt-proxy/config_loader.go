@@ -71,6 +71,22 @@ func configureLogging(proxy *Proxy, flags *ConfigFlags, config *Config) {
 	}
 }
 
+// logOutboundSources reports missing source families and effective system DNS exclusions.
+func logOutboundSources(policy *outboundSourcePolicy, ignoreSystemDNS bool) {
+	if !policy.enabled() {
+		return
+	}
+	if !policy.ipv4.IsValid() {
+		dlog.Info("No outbound IPv4 source is configured. Covered non-local IPv4 connections will fail.")
+	}
+	if !policy.ipv6.IsValid() {
+		dlog.Info("No outbound IPv6 source is configured. Covered non-local IPv6 connections will fail.")
+	}
+	if !ignoreSystemDNS {
+		dlog.Info("Native system DNS does not use outbound source binding.")
+	}
+}
+
 // configureXTransport - Configures the XTransport
 func configureXTransport(proxy *Proxy, config *Config) error {
 	proxy.xTransport.tlsDisableSessionTickets = config.TLSDisableSessionTickets
@@ -123,7 +139,11 @@ func configureXTransport(proxy *Proxy, config *Config) error {
 		if err != nil {
 			return fmt.Errorf("Unable to parse the proxy URL [%v]", config.Proxy)
 		}
-		proxyDialer, err := netproxy.FromURL(proxyDialerURL, netproxy.Direct)
+		forwardDialer := netproxy.Dialer(netproxy.Direct)
+		if proxy.outboundSource.enabled() {
+			forwardDialer = &proxyDialer{xTransport: proxy.xTransport}
+		}
+		proxyDialer, err := netproxy.FromURL(proxyDialerURL, forwardDialer)
 		if err != nil {
 			return fmt.Errorf("Unable to use the proxy: [%v]", err)
 		}

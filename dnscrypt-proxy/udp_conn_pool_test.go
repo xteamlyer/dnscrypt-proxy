@@ -3,13 +3,114 @@ package main
 import (
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
+func TestUDPConnPool_SourceBinding(t *testing.T) {
+	sourceIP := nonLoopbackIPv4(t)
+	policy, err := parseOutboundSources(sourceIP.String(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	destination := listener.LocalAddr().(*net.UDPAddr)
+	// net.ParseIP intentionally supplies the 16-byte mapped representation.
+	destination = &net.UDPAddr{IP: net.ParseIP(sourceIP.String()), Port: destination.Port}
+
+	pool := NewUDPConnPool(&policy)
+	defer pool.Close()
+	conn, err := pool.Get(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	packet := make([]byte, 1)
+	if err := listener.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_, peer, err := listener.ReadFromUDP(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !peer.IP.Equal(sourceIP) {
+		t.Fatalf("peer source = %s, want %s", peer.IP, sourceIP)
+	}
+
+	pool.Put(destination, conn)
+	reused, err := pool.Get(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused != conn {
+		t.Fatal("pooled connection was not reused")
+	}
+	pool.Discard(reused)
+	replacement, err := pool.Get(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement == reused {
+		t.Fatal("discarded connection was reused")
+	}
+	pool.Discard(replacement)
+}
+
+func TestUDPConnPool_Loopback(t *testing.T) {
+	policy, err := parseOutboundSources("192.0.2.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	pool := NewUDPConnPool(&policy)
+	defer pool.Close()
+	conn, err := pool.Get(listener.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Discard(conn)
+	if !conn.LocalAddr().(*net.UDPAddr).IP.IsLoopback() {
+		t.Fatalf("loopback destination used configured source: %s", conn.LocalAddr())
+	}
+}
+
+func TestUDPConnPool_BindFailure(t *testing.T) {
+	destinationIP := nonLoopbackIPv4(t)
+	configured := "192.0.2.1"
+	if destinationIP.Equal(net.ParseIP(configured)) {
+		configured = "198.51.100.1"
+	}
+	policy, err := parseOutboundSources(configured, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := NewUDPConnPool(&policy)
+	defer pool.Close()
+	_, err = pool.Get(&net.UDPAddr{IP: destinationIP, Port: 53})
+	if err == nil {
+		t.Skipf("host permits binding non-local test address %s", configured)
+	}
+	for _, want := range []string{"outbound_source_ipv4", configured, "udp4", destinationIP.String()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
 func TestUDPConnPool_Basic(t *testing.T) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:53")
@@ -47,7 +148,7 @@ func TestUDPConnPool_Basic(t *testing.T) {
 }
 
 func TestUDPConnPool_MaxConns(t *testing.T) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:53")
@@ -72,7 +173,7 @@ func TestUDPConnPool_MaxConns(t *testing.T) {
 }
 
 func TestUDPConnPool_Discard(t *testing.T) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:53")
@@ -91,7 +192,7 @@ func TestUDPConnPool_Discard(t *testing.T) {
 }
 
 func TestUDPConnPool_Concurrent(t *testing.T) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:53")
@@ -122,7 +223,7 @@ func TestUDPConnPool_Concurrent(t *testing.T) {
 }
 
 func TestUDPConnPool_MultipleAddresses(t *testing.T) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addr1, _ := net.ResolveUDPAddr("udp", "127.0.0.1:53")
@@ -144,7 +245,7 @@ func TestUDPConnPool_MultipleAddresses(t *testing.T) {
 }
 
 func TestUDPConnPool_Close(t *testing.T) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:53")
 
@@ -167,7 +268,7 @@ func TestUDPConnPool_Close(t *testing.T) {
 }
 
 func BenchmarkUDPConnPool_GetPut(b *testing.B) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:53")
@@ -193,7 +294,7 @@ func BenchmarkUDPDial_NoPool(b *testing.B) {
 }
 
 func BenchmarkUDPConnPool_Contention(b *testing.B) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:53")
@@ -211,7 +312,7 @@ func BenchmarkUDPConnPool_Contention(b *testing.B) {
 }
 
 func BenchmarkUDPConnPool_MultiAddrContention(b *testing.B) {
-	pool := NewUDPConnPool()
+	pool := NewUDPConnPool(nil)
 	defer pool.Close()
 
 	addrs := make([]*net.UDPAddr, 16)

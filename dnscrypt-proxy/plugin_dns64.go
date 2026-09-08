@@ -200,12 +200,17 @@ func translateToIPv6(ipv4 net.IP, prefix *net.IPNet) net.IP {
 func (plugin *PluginDNS64) fetchPref64(resolver string) error {
 	msg := dns.NewMsg(rfc7050WKN, dns.TypeAAAA)
 
-	client := new(dns.Client)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	resp, _, err := client.Exchange(ctx, msg, "udp", resolver)
+	transport := newDNSTransport()
+	network, resolver, target, err := plugin.proxy.outboundSource.configureDialer(transport.Dialer, "udp", resolver)
 	if err != nil {
 		return err
+	}
+	client := &dns.Client{Transport: transport}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, _, err := client.Exchange(ctx, msg, network, resolver)
+	if err != nil {
+		return target.wrapDialError("udp", err)
 	}
 
 	if resp == nil || resp.Rcode != dns.RcodeSuccess {

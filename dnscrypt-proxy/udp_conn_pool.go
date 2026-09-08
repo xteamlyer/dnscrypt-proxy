@@ -31,11 +31,13 @@ type UDPConnPool struct {
 	closed   int32 // atomic
 	stopOnce sync.Once
 	stopCh   chan struct{}
+	policy   *outboundSourcePolicy
 }
 
-func NewUDPConnPool() *UDPConnPool {
+func NewUDPConnPool(policy *outboundSourcePolicy) *UDPConnPool {
 	pool := &UDPConnPool{
 		stopCh: make(chan struct{}),
+		policy: policy,
 	}
 	for i := range pool.shards {
 		pool.shards[i].conns = make(map[string][]*pooledConn)
@@ -107,7 +109,7 @@ func (p *UDPConnPool) Get(addr *net.UDPAddr) (*net.UDPConn, error) {
 	}
 	shard.Unlock()
 
-	return net.DialUDP("udp", nil, addr)
+	return p.policy.dialUDP(addr)
 }
 
 func (p *UDPConnPool) Put(addr *net.UDPAddr, conn *net.UDPConn) {

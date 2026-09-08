@@ -113,6 +113,7 @@ type Proxy struct {
 	ipCryptConfig                 *IPCryptConfig
 	udpConnPool                   *UDPConnPool
 	netMonitor                    *networkMonitor
+	outboundSource                outboundSourcePolicy
 }
 
 func (proxy *Proxy) registerUDPListener(conn *net.UDPConn) {
@@ -716,7 +717,7 @@ func (proxy *Proxy) exchangeWithTCPServer(
 	var pc net.Conn
 	proxyDialer := proxy.xTransport.proxyDialer
 	if proxyDialer == nil {
-		pc, err = net.DialTimeout("tcp", upstreamAddr.String(), serverInfo.Timeout)
+		pc, err = proxy.outboundSource.dialTCP(upstreamAddr.AddrPort(), serverInfo.Timeout, 0)
 	} else {
 		pc, err = (*proxyDialer).Dial("tcp", upstreamAddr.String())
 	}
@@ -939,8 +940,7 @@ func (proxy *Proxy) processIncomingQuery(
 }
 
 func NewProxy() *Proxy {
-	return &Proxy{
-		serversInfo: NewServersInfo(),
-		udpConnPool: NewUDPConnPool(),
-	}
+	proxy := &Proxy{serversInfo: NewServersInfo()}
+	proxy.udpConnPool = NewUDPConnPool(&proxy.outboundSource)
+	return proxy
 }
