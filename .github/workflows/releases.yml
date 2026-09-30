@@ -1,20 +1,8 @@
 on:
   push:
-    paths:
-      - "**.go"
-      - "go.*"
-      - "**/testdata/**"
-      - ".ci/**"
-      - ".git*"
-      - ".github/workflows/releases.yml"
   pull_request:
-    paths:
-      - "**.go"
-      - "go.*"
-      - "**/testdata/**"
-      - ".ci/**"
-      - ".git*"
-      - ".github/workflows/releases.yml"
+  workflow_dispatch:
+    
 
 name: GitHub CI
 
