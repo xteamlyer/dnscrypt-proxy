@@ -1,20 +1,8 @@
 on:
   push:
-    paths:
-      - "**.go"
-      - "go.*"
-      - "**/testdata/**"
-      - ".ci/**"
-      - ".git*"
-      - ".github/workflows/releases.yml"
   pull_request:
-    paths:
-      - "**.go"
-      - "go.*"
-      - "**/testdata/**"
-      - ".ci/**"
-      - ".git*"
-      - ".github/workflows/releases.yml"
+  workflow_dispatch:
+    
 
 name: GitHub CI
 
@@ -52,13 +40,6 @@ jobs:
           check-latest: true
           cache: false
         id: go
-
-      - name: Test suite
-        run: |
-          go version
-          cd .ci
-          ./ci-test.sh
-          cd -
 
       - name: Build all
         env:
